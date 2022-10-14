@@ -14,8 +14,8 @@ from sklearn.model_selection import GroupShuffleSplit
 from sklearn.utils import shuffle
 from tqdm import tqdm
 
-import mapping_labels
-from utils import block_print, enable_print
+from .mapping_labels import LABEL_TO_IDX
+from .utils import block_print, enable_print
 
 
 class PlotAccessorDataPerDay:
@@ -244,7 +244,7 @@ class DataPerDay:
         else:
             elecs = self.y[:, 0]
 
-            label_to_idx_vectorized = np.vectorize(mapping_labels.LABEL_TO_IDX.get)
+            label_to_idx_vectorized = np.vectorize(LABEL_TO_IDX.get)
             labels = label_to_idx_vectorized(elecs)
             return labels
 
@@ -258,15 +258,14 @@ class DataPerDay:
         """
         # create list of tuple with (idx_elec, #of_this_elec_in_dataset)
         list_counts = [
-            (mapping_labels.LABEL_TO_IDX[k], v)
-            for (k, v) in self.differents_elecs().items()
+            (LABEL_TO_IDX[k], v) for (k, v) in self.differents_elecs().items()
         ]
 
         # separate idx and counts
         idx, counts = np.array(list_counts).T
 
         # calculate probability of each elec in the dataset
-        density = np.zeros(len(mapping_labels.LABEL_TO_IDX), dtype=np.float32)
+        density = np.zeros(len(LABEL_TO_IDX), dtype=np.float32)
         density[idx] = counts / counts.sum()
 
         # calculate weigths to apply in each class
