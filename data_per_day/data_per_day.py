@@ -107,18 +107,32 @@ class DataPerDay:
 
     def __init__(
         self,
+        *,
         X: np.ndarray,
-        agg: np.ndarray,
         y: np.ndarray,
         sample_period: int,
         threshold: int,
+        additional_arrays: Optional[Dict[str, np.ndarray]] = None,  # agg, agg_reactive
     ):
         self.X = X
-        self.agg = agg
         self.y = y
         self.sample_period = sample_period
         self.threshold = threshold
         self.plot = PlotAccessorDataPerDay(self)
+        self.additional_arrays = (
+            additional_arrays if additional_arrays is not None else {}
+        )
+        self._check_sizes()
+
+    def _check_sizes(self):
+        """
+        Check that every size is the same for all the arrays.
+        """
+        sizes = [len(self.X), len(self.y)]
+        for array in self.additional_arrays.values():
+            sizes.append(len(array))
+        if len(set(sizes)) != 1:
+            raise ValueError("Sizes of arrays are not the same")
 
     def __repr__(self):
         string = (
@@ -127,7 +141,7 @@ class DataPerDay:
             f"""\n\t{len(self.differents_appliances())} differents appliances, """
             f"""\n\t{len(np.unique(self.y[:, 0]))} differents elecs type, """
             f"""\n\t{self.sample_period} sample period, """
-            f"""\n\tX: {self.X},\n\td: {self.agg},\n\ty: {self.y}\n)\n"""
+            f"""\n\tX: {self.X}, \n\ty: {self.y}\n)\n"""
         )
         return string
 
@@ -141,16 +155,22 @@ class DataPerDay:
         assert self.sample_period == other.sample_period
         assert self.threshold == other.threshold
         X = np.concatenate((self.X, other.X), axis=0)
-        agg = np.concatenate((self.agg, other.agg), axis=0)
         y = np.concatenate((self.y, other.y), axis=0)
+        additional_arrays = {}
+        for key in self.additional_arrays:
+            if key in other.additional_arrays:
+                # if doesn't exist in other, it doesn't exist in the result
+                additional_arrays[key] = np.concatenate(
+                    (self.additional_arrays[key], other.additional_arrays[key]), axis=0
+                )
         sample_period = self.sample_period
         threshold = self.threshold
         result = type(self)(
             X=X,
-            agg=agg,
             y=y,
             sample_period=sample_period,
             threshold=threshold,
+            additional_arrays=additional_arrays,
         )
         return result
 
@@ -166,16 +186,18 @@ class DataPerDay:
             idx = slice(idx, idx + 1)
 
         X = self.X[idx]
-        agg = self.agg[idx]
         y = self.y[idx]
         sample_period = self.sample_period
         threshold = self.threshold
+        additional_arrays = {}
+        for key in self.additional_arrays:
+            additional_arrays[key] = self.additional_arrays[key][idx]
         result = type(self)(
             X=X,
-            agg=agg,
             y=y,
             sample_period=sample_period,
             threshold=threshold,
+            additional_arrays=additional_arrays,
         )
         return result
 
@@ -197,14 +219,8 @@ class DataPerDay:
         """
         Returns a DataPerDay view with new order of samples.
         """
-        X, agg, y = shuffle(self.X, self.agg, self.y, random_state=seed)
-        return DataPerDay(
-            X=X,
-            agg=agg,
-            y=y,
-            sample_period=self.sample_period,
-            threshold=self.threshold,
-        )
+        new_idx = np.random.permutation(len(self))
+        return self[new_idx]
 
     @property
     def data_elec(self) -> np.ndarray:
@@ -216,7 +232,19 @@ class DataPerDay:
 
     @property
     def data_agg(self) -> np.ndarray:
-        return self.agg
+        return self.additional_arrays["agg"]
+
+    @property
+    def data_agg_reactive(self) -> np.ndarray:
+        return self.additional_arrays["agg_reactive"]
+
+    @property
+    def agg(self) -> np.ndarray:
+        return self.data_agg
+
+    @property
+    def agg_reactive(self) -> np.ndarray:
+        return self.data_agg_reactive
 
     def binary_label(
         self, type_of_appliance: str = "electric water heating appliance"
@@ -311,21 +339,13 @@ class DataPerDay:
         return self.get_elec(elecs)
 
     def dataperday_with_most_common_elecs(self, num_most_common: int) -> "DataPerDay":
+        """
+        Get the idx of most common elecs and return a DataPerDay with
+        only this elecs.
+        """
         elecs = self.differents_elecs().most_common(num_most_common)
-        X = self.X
-        agg = self.agg
-        y = self.y
-        X = X[np.isin(y[:, 0], elecs)]
-        agg = agg[np.isin(y[:, 0], elecs)]
-        y = y[np.isin(y[:, 0], elecs)]
-        result = type(self)(
-            X=X,
-            agg=agg,
-            y=y,
-            sample_period=self.sample_period,
-            threshold=self.threshold,
-        )
-        return result
+        idx = np.isin(y[:, 0], elecs)
+        return self[idx]
 
     def summary_elec_dataset(
         self,
@@ -371,55 +391,70 @@ class DataPerDay:
         np.random.seed(seed)
 
         Xs_train = []
-        aggs_train = []
         ys_train = []
+        additional_arrays_train = {}
+        for key in self.additional_arrays.keys():
+            additional_arrays_train[key] = []
 
         Xs_test = []
-        aggs_test = []
         ys_test = []
+        additional_arrays_test = {}
+        for key in self.additional_arrays.keys():
+            additional_arrays_test[key] = []
 
         for elec_name in tqdm(self.differents_elecs().keys()):
             dataperday_elec = self.get_elec(elec_name)
             X_elec = dataperday_elec.X
-            agg_elec = dataperday_elec.agg
             y_elec = dataperday_elec.y
+            additional_arrays_elec = {}
+            for key in self.additional_arrays.keys():
+                additional_arrays_elec[key] = dataperday_elec.additional_arrays[key]
             if len(dataperday_elec.differents_appliances()) <= 1:
                 Xs_train.append(X_elec)
-                aggs_train.append(agg_elec)
                 ys_train.append(y_elec)
+                for key in self.additional_arrays.keys():
+                    additional_arrays_train[key].append(additional_arrays_elec[key])
             else:
                 groups_elec = dataperday_elec.groups()
                 gss = GroupShuffleSplit(n_splits=1, train_size=1 - test_size)
                 idx_train, idx_test = next(gss.split(X_elec, groups=groups_elec))
                 Xs_train.append(X_elec[idx_train])
-                aggs_train.append(agg_elec[idx_train])
                 ys_train.append(y_elec[idx_train])
+                for key in self.additional_arrays.keys():
+                    additional_arrays_train[key].append(
+                        additional_arrays_elec[key][idx_train]
+                    )
 
                 Xs_test.append(X_elec[idx_test])
-                aggs_test.append(agg_elec[idx_test])
                 ys_test.append(y_elec[idx_test])
+                for key in self.additional_arrays.keys():
+                    additional_arrays_test[key].append(
+                        additional_arrays_elec[key][idx_test]
+                    )
 
         Xs_train = np.concatenate(Xs_train)
-        aggs_train = np.concatenate(aggs_train)
         ys_train = np.concatenate(ys_train)
+        for key in self.additional_arrays.keys():
+            additional_arrays_train[key] = np.concatenate(additional_arrays_train[key])
 
         Xs_test = np.concatenate(Xs_test)
-        aggs_test = np.concatenate(aggs_test)
         ys_test = np.concatenate(ys_test)
+        for key in self.additional_arrays.keys():
+            additional_arrays_test[key] = np.concatenate(additional_arrays_test[key])
 
         dataperday_train = DataPerDay(
             X=Xs_train,
-            agg=aggs_train,
             y=ys_train,
             sample_period=sample_period,
             threshold=threshold,
+            additional_arrays=additional_arrays_train,
         )
         dataperday_test = DataPerDay(
             X=Xs_test,
-            agg=aggs_test,
             y=ys_test,
             sample_period=sample_period,
             threshold=threshold,
+            additional_arrays=additional_arrays_test,
         )
         TrainTestDataPerDay = namedtuple("TrainTestDataPerDay", "train test")
 
@@ -437,19 +472,26 @@ class DataPerDay:
         for new_sample_period in new_sample_periods:
             assert new_sample_period % self.sample_period == 0
             X = self.X
-            agg = self.agg
             y = self.y
+            additional_arrays = {}
+            for key in self.additional_arrays.keys():
+                additional_arrays[key] = self.additional_arrays[key]
             threshold = self.threshold
             factor = new_sample_period // self.sample_period
             shape = X.shape
             X = X.reshape((shape[0], shape[1] // factor, -1)).mean(axis=2)
-            agg = agg.reshape((shape[0], shape[1] // factor, -1)).mean(axis=2)
+            for key in self.additional_arrays.keys():
+                additional_arrays[key] = (
+                    additional_arrays[key]
+                    .reshape((shape[0], shape[1] // factor, -1))
+                    .mean(axis=2)
+                )
             new_array = type(self)(
                 X=X,
-                agg=agg,
                 y=y,
                 sample_period=new_sample_period,
                 threshold=threshold,
+                additional_arrays=additional_arrays,
             )
             result[new_sample_period] = new_array
         return result
@@ -475,38 +517,45 @@ class DataPerDay:
         np.random.seed(seed)
 
         Xs = []
-        aggs = []
         ys = []
+        additional_arrays = {}
+        for key in self.additional_arrays.keys():
+            additional_arrays[key] = []
 
         for elec_name in tqdm(self.differents_elecs().keys()):
             dataperday_elec = self.get_elec(elec_name)
             X = dataperday_elec.X
-            agg = dataperday_elec.agg
             y = dataperday_elec.y
+            additional_arrays_elec = {}
+            for key in self.additional_arrays.keys():
+                additional_arrays_elec[key] = dataperday_elec.additional_arrays[key]
 
             # Seleccion `num_samples` sin remplazo para evitar repetidos
             idx_1 = np.random.choice(
                 np.arange(X.shape[0]), min(num_samples, len(X)), replace=False
             )
             Xs.append(X[idx_1])
-            aggs.append(agg[idx_1])
             ys.append(y[idx_1])
+            for key in self.additional_arrays.keys():
+                additional_arrays[key].append(additional_arrays_elec[key][idx_1])
 
             idx_2 = np.random.randint(0, X.shape[0], num_samples - len(idx_1))
             Xs.append(X[idx_2])
-            aggs.append(agg[idx_2])
             ys.append(y[idx_2])
+            for key in self.additional_arrays.keys():
+                additional_arrays[key].append(additional_arrays_elec[key][idx_2])
 
         Xs = np.concatenate(Xs)
-        aggs = np.concatenate(aggs)
         ys = np.concatenate(ys)
+        for key in self.additional_arrays.keys():
+            additional_arrays[key] = np.concatenate(additional_arrays[key])
 
         return DataPerDay(
             X=Xs,
-            agg=aggs,
             y=ys,
             sample_period=sample_period,
             threshold=threshold,
+            additional_arrays=additional_arrays,
         )
 
     def get_by(
@@ -608,14 +657,19 @@ class DataPerDay:
             (self.X > self.agg).sum(axis=1)
         ) < 2  # agg > elec en casi todas las muestras
         idx &= ~((self.X < -15).sum(axis=1) > 0)  # potencias negativas
-        idx &= ~((self.agg < -15).sum(axis=1) > 0)  # potencias negativas
+        if "agg" in self.additional_arrays.keys():
+            idx &= ~(
+                (self.additional_arrays["agg"] < -15).sum(axis=1) > 0
+            )  # potencias negativas
 
         result = self[idx]
         result.X = np.clip(
             result.X, 0, None
         )  # mando a 0 las potencias negativas pequenas
-        result.agg = np.clip(result.agg, 0, None)
-
+        if "agg" in self.additional_arrays.keys():
+            result.additional_arrays["agg"] = np.clip(
+                result.additional_arrays["agg"], 0, None
+            )  # mando a 0 las potencias negativas pequenas
         return result
 
     def change_elec_name(self, name_map: Dict[str, str]) -> "DataPerDay":
@@ -635,10 +689,10 @@ class DataPerDay:
             pickle.dump(
                 {
                     "X": self.X,
-                    "agg": self.agg,
                     "y": self.y,
                     "sample_period": self.sample_period,
                     "threshold": self.threshold,
+                    "additional_arrays": self.additional_arrays,
                 },
                 fp,
             )
@@ -652,10 +706,10 @@ class DataPerDay:
             data = pickle.load(fp)
         return clf(
             X=data["X"],
-            agg=data["agg"],
             y=data["y"],
             sample_period=data["sample_period"],
             threshold=data["threshold"],
+            additional_arrays=data["additional_arrays"],
         )
 
     @classmethod
@@ -745,9 +799,10 @@ def convert_nilmtkh5_to_dataperday(
         - threshold
     """
     dataset_name = nilmtk_dataset.metadata["name"]
-    X = list()
+    X = []
     agg = []
-    y = list()
+    agg_reactive = []
+    y = []
     for building in tqdm(
         nilmtk_dataset.buildings.keys(),
         disable=not verbose,
@@ -811,6 +866,12 @@ def convert_nilmtkh5_to_dataperday(
                 ):
                     continue
 
+                # verifico que tenga las mediciones correctas
+                if (("power_agg", "active") not in df_all) and (
+                    ("power_agg", "apparent") not in df_all
+                ):
+                    continue
+
                 for df in _separate_df_per_day(df_all):
                     seconds_in_a_day = 60 * 60 * 24
                     if (
@@ -835,6 +896,11 @@ def convert_nilmtkh5_to_dataperday(
                         else:
                             agg.append(np.full(len(X[0]), np.nan))
 
+                        if ("power_agg", "reactive") in df_all:
+                            agg_reactive.append(df["power_agg", "reactive"].to_numpy())
+                        else:
+                            agg_reactive.append(np.empty_like(agg[-1]))
+
                         y.append(
                             (
                                 elec_name,
@@ -844,14 +910,29 @@ def convert_nilmtkh5_to_dataperday(
                                 df.index[0].date(),
                             )
                         )
-    X, agg, y = (
+                        import ipdb
+
+                        ipdb.set_trace()
+    X, agg, agg_reactive, y = (
         np.array(X, dtype=np.float32),
         np.array(agg, dtype=np.float32),
+        np.array(agg_reactive, dtype=np.float32),
         np.array(y, dtype=np.object),
     )
+    if len(agg_reactive) == len(agg):
+        additional_arrays = {"agg": agg, "agg_reactive": agg_reactive}
+    else:
+        additional_arrays = {"agg": agg}
+        print("agg_reactive is not available or has different length than agg")
 
     return (
-        DataPerDay(X=X, agg=agg, y=y, sample_period=sample_period, threshold=threshold)
+        DataPerDay(
+            X=X,
+            y=y,
+            sample_period=sample_period,
+            threshold=threshold,
+            additional_arrays=additional_arrays,
+        )
         .drop_unknown()
         .drop_by(elec="sockets")
     )

@@ -40,7 +40,9 @@ def main(datasets_h5_path: Path, datasets_per_day_path: Path):
             print(f"Using {name} from cache in {path_pickle}")
         else:
             data = convert_nilmtkh5_to_dataperday(
-                dataset, threshold=50, sample_period=60
+                dataset,
+                threshold=50,
+                sample_period=60,
             )
             data.save(path=path_pickle)
 
