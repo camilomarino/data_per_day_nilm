@@ -17,6 +17,8 @@ from tqdm import tqdm
 from .mapping_labels import LABEL_TO_IDX
 from .utils import block_print, enable_print
 
+SECONDS_IN_A_DAY = 60 * 60 * 24
+
 
 class PlotAccessorDataPerDay:
     """
@@ -469,23 +471,15 @@ class DataPerDay:
         result = DataPerDayCollection()
         if isinstance(new_sample_periods, int):
             new_sample_periods = [new_sample_periods]
+        y = self.y
         for new_sample_period in new_sample_periods:
-            assert new_sample_period % self.sample_period == 0
-            X = self.X
-            y = self.y
+            X = self._resample_array(self.X, new_sample_period)
             additional_arrays = {}
             for key in self.additional_arrays.keys():
-                additional_arrays[key] = self.additional_arrays[key]
-            threshold = self.threshold
-            factor = new_sample_period // self.sample_period
-            shape = X.shape
-            X = X.reshape((shape[0], shape[1] // factor, -1)).mean(axis=2)
-            for key in self.additional_arrays.keys():
-                additional_arrays[key] = (
-                    additional_arrays[key]
-                    .reshape((shape[0], shape[1] // factor, -1))
-                    .mean(axis=2)
+                additional_arrays[key] = self._resample_array(
+                    self.additional_arrays[key], new_sample_period
                 )
+            threshold = self.threshold
             new_array = type(self)(
                 X=X,
                 y=y,
@@ -495,6 +489,41 @@ class DataPerDay:
             )
             result[new_sample_period] = new_array
         return result
+
+    def resample_agg(self, new_sample_period: int) -> "DataPerDay":
+        """
+        Only resample agg values (and agg_reactive if exists)
+        new_sample_period: in seconds
+        """
+        X = self.X
+        y = self.y
+        additional_arrays = {}
+        additional_arrays["agg"] = self._resample_array(
+            self.additional_arrays["agg"], new_sample_period
+        )
+        if "agg_reactive" in self.additional_arrays.keys():
+            additional_arrays["agg_reactive"] = self._resample_array(
+                self.additional_arrays["agg_reactive"], new_sample_period
+            )
+        threshold = self.threshold
+        new_array = type(self)(
+            X=X,
+            y=y,
+            sample_period=new_sample_period,
+            threshold=threshold,
+            additional_arrays=additional_arrays,
+        )
+        return new_array
+
+    def _resample_array(self, array: np.ndarray, new_sample_period: int) -> np.ndarray:
+        """
+        new_sample_period: in seconds
+        """
+        current_sample_period = SECONDS_IN_A_DAY // array.shape[1]
+        assert new_sample_period % current_sample_period == 0
+        factor = new_sample_period // current_sample_period
+        shape = array.shape
+        return array.reshape((shape[0], shape[1] // factor, -1)).mean(axis=2)
 
     def get_n_per_elec(self, num_samples: Optional[int] = None, seed: int = 0):
         """
