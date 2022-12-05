@@ -346,7 +346,7 @@ class DataPerDay:
         only this elecs.
         """
         elecs = self.differents_elecs().most_common(num_most_common)
-        idx = np.isin(y[:, 0], elecs)
+        idx = np.isin(self.y[:, 0], elecs)
         return self[idx]
 
     def summary_elec_dataset(
@@ -733,6 +733,9 @@ class DataPerDay:
         """
         with open(path, "rb") as fp:
             data = pickle.load(fp)
+        # check if additional_arrays are present in data
+        if "additional_arrays" not in data.keys():
+            data["additional_arrays"] = {}
         return clf(
             X=data["X"],
             y=data["y"],
