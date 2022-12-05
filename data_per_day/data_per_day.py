@@ -872,7 +872,14 @@ def convert_nilmtkh5_to_dataperday(
                 # load data
                 block_print()  # nilmtk has some unnecessary footprints
                 df_elec_all = next(
-                    elec.load(sample_period=sample_period, resample=True, verbose=False)
+                    elec.load(
+                        sample_period=sample_period,
+                        resample=True,
+                        verbose=False,
+                        resample_kwargs={
+                            "limit": 15
+                        },  # for resample from 15 minutes to 1 minute
+                    )
                 )
                 enable_print()
                 if len(df_elec_all) == 0:
@@ -895,12 +902,6 @@ def convert_nilmtkh5_to_dataperday(
                 # verifico que tenga las mediciones correctas
                 if (("power_elec", "active") not in df_all) and (
                     ("power_elec", "apparent") not in df_all
-                ):
-                    continue
-
-                # verifico que tenga las mediciones correctas
-                if (("power_agg", "active") not in df_all) and (
-                    ("power_agg", "apparent") not in df_all
                 ):
                     continue
 
@@ -942,9 +943,6 @@ def convert_nilmtkh5_to_dataperday(
                                 df.index[0].date(),
                             )
                         )
-                        import ipdb
-
-                        ipdb.set_trace()
     X, agg, agg_reactive, y = (
         np.array(X, dtype=np.float32),
         np.array(agg, dtype=np.float32),
