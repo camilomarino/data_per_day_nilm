@@ -6,17 +6,6 @@ from data_per_day import DataPerDay
 
 app = typer.Typer(add_completion=False)
 
-ELECS = [
-    "electric water heating appliance",
-    "air conditioner",
-    "electric vehicle",
-    "kettle",
-    "fridge",
-    "washing machine",
-    "microwave",
-    "dish washer",
-]
-
 
 @app.command()
 def main(
@@ -38,9 +27,7 @@ def main(
         raise ValueError
 
     # load complete dataset
-    dataperday_dataset = DataPerDay.load(dataperday_path).get_by(
-        elec=ELECS, mantain_others=True
-    )
+    dataperday_dataset = DataPerDay.load(dataperday_path)
 
     # split sets
     dataperday_train, dataperday_val_test = dataperday_dataset.train_test_split(
